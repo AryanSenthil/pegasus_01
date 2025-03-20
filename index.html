@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>WiFi Credentials Sender</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 300px;
+      margin: 0 auto;
+      background-color: #f5f5f5;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input {
+      width: 100%;
+      padding: 8px;
+      box-sizing: border-box;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      padding: 10px 15px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      width: 100%;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    #status {
+      margin-top: 20px;
+      padding: 10px;
+      border-radius: 4px;
+      text-align: center;
+    }
+    .success {
+      background-color: #d4edda;
+      color: #155724;
+    }
+    .error {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+    .loading {
+      background-color: #e2f3f5;
+      color: #0c5460;
+    }
+  </style>
+</head>
+<body>
+  <h2>WiFi Credentials Sender</h2>
+  
+  <div class="form-group">
+    <label for="ssid">SSID:</label>
+    <input type="text" id="ssid" placeholder="Enter WiFi network name">
+  </div>
+  
+  <div class="form-group">
+    <label for="password">Password:</label>
+    <input type="password" id="password" placeholder="Enter WiFi password">
+  </div>
+  
+  <button id="sendBtn">Send to Jetson</button>
+  
+  <div id="status" style="display: none;"></div>
+  
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    // Backend status tracking
+    let backendReady = false;
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    // Listen for backend status updates
+    ipcRenderer.on('backend-status', (event, data) => {
+      if (data.status === 'ready') {
+        backendReady = true;
+        showStatus('Backend ready. You can now send WiFi credentials.', true);
+      } else if (data.status === 'error') {
+        backendReady = false;
+        showStatus(`Backend error: ${data.error}`, false);
+      } else if (data.status === 'stopped') {
+        backendReady = false;
+        if (data.error) {
+          showStatus(`Backend stopped with error: ${data.error}`, false);
+        }
+      }
+    });
+    
+    // Show initial status while waiting for backend
+    showStatus('Starting Python backend...', null);
+    
+    document.getElementById('sendBtn').addEventListener('click', async () => {
+      const ssid = document.getElementById('ssid').value.trim();
+      const password = document.getElementById('password').value.trim();
+      
+      if (!ssid) {
+        showStatus('Please enter an SSID', false);
+        return;
+      }
+      
+      const sendBtn = document.getElementById('sendBtn');
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Connecting...';
+      
+      showStatus('Connecting to Jetson via Bluetooth...', null);
+      
+      const sendRequest = async () => {
+        try {
+          // Send credentials to main process which will forward to Python backend
+          const response = await ipcRenderer.invoke('send-credentials', { ssid, password });
+          
+          if (response.success) {
+            showStatus(`Connected successfully! Jetson IP: ${response.ip}`, true);
+          } else {
+            showStatus(response.message || 'Failed to connect to Jetson', false);
+          }
+          return true;
+        } catch (error) {
+          if (error.message.includes('ECONNREFUSED') && retryCount < maxRetries) {
+            retryCount++;
+            showStatus(`Backend not ready. Retrying (${retryCount}/${maxRetries})...`, null);
+            // Wait and retry
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            return await sendRequest();
+          } else {
+            showStatus(`Error: ${error.message}. Check if Python and required packages are installed.`, false);
+            return false;
+          }
+        }
+      };
+      
+      await sendRequest();
+      
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send to Jetson';
+      retryCount = 0;
+    });
+    
+    function showStatus(message, isSuccess) {
+      const statusEl = document.getElementById('status');
+      statusEl.textContent = message;
+      statusEl.style.display = 'block';
+      
+      // Clear existing classes
+      statusEl.classList.remove('success', 'error', 'loading');
+      
+      // Add appropriate class based on success state
+      if (isSuccess === true) {
+        statusEl.classList.add('success');
+      } else if (isSuccess === false) {
+        statusEl.classList.add('error');
+      } else {
+        statusEl.classList.add('loading');
+      }
+    }
+  </script>
+</body>
+</html>
