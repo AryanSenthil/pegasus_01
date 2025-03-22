@@ -47,6 +47,7 @@ async def send_credentials(credentials: WiFiCredentials):
         ip_data = sock.recv(4096)
         jetson_ip = pickle.loads(ip_data)
         sock.close()
+        print(jetson_ip)
         
         if jetson_ip:
             print(f"Received Jetson IP: {jetson_ip}")
