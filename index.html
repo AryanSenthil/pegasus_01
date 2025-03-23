@@ -44,6 +44,18 @@
       background-color: #cccccc;
       cursor: not-allowed;
     }
+    button.secondary {
+      background-color: #607D8B;
+    }
+    button.secondary:hover {
+      background-color: #546E7A;
+    }
+    button.warning {
+      background-color: #f44336;
+    }
+    button.warning:hover {
+      background-color: #d32f2f;
+    }
     #status {
       margin-top: 20px;
       padding: 10px;
@@ -158,6 +170,23 @@
       border-radius: 4px;
       overflow-x: auto;
     }
+    .button-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .button-group button {
+      flex: 1;
+    }
+    .device-status {
+      margin-top: 15px;
+      font-weight: bold;
+    }
+    .device-ip {
+      color: #0c5460;
+      font-family: monospace;
+      font-size: 0.9em;
+    }
   </style>
 </head>
 <body>
@@ -181,13 +210,15 @@
       <small>Enter the MAC address of your Fermia device (format: 00:11:22:33:44:55)</small>
     </div>
 
-    <div class="form-group">
-      <label for="fermiaIp">Fermia IP:</label>
-      <input type="text" id="fermiaIp" placeholder="xxx.xxx.xxx.xxx">
-      <small>This field will be populated after connection</small>
-    </div>
+    <!-- Hidden input for Fermia IP -->
+    <input type="hidden" id="fermiaIp">
 
     <button id="sendBtn">Connect to Fermia</button>
+    
+    <div class="button-group">
+      <button id="refreshBtn" class="secondary">Refresh Status</button>
+      <button id="resetBtn" class="warning">Reset Config</button>
+    </div>
   </div>
   
   <div id="status" style="display: none;"></div>
@@ -201,6 +232,8 @@
         <li>Double-check the MAC address format (XX:XX:XX:XX:XX:XX)</li>
         <li>Ensure your WiFi network is available and the credentials are correct</li>
         <li>If connection fails, try restarting the application</li>
+        <li>Use the "Reset Config" button to clear all settings if needed</li>
+        <li>If a "connection reset by peer" error occurs, ensure that the entered credentials (WiFi SSID, password, and MAC address) are accurate and match the settings on your Fermia device.</li>
       </ol>
     </details>
   </div>
@@ -215,6 +248,10 @@
     
     // Load configuration on startup
     window.addEventListener('DOMContentLoaded', async () => {
+      loadConfig();
+    });
+
+    async function loadConfig() {
       try {
         const config = await ipcRenderer.invoke('load-config');
         
@@ -223,7 +260,7 @@
         document.getElementById('password').value = config.wifiPassword || '';
         document.getElementById('jetsonMac').value = config.fermiaMac || '';
         
-        // Handle IP address field
+        // Store IP in hidden field
         const ipField = document.getElementById('fermiaIp');
         if (config.fermiaIp) {
           ipField.value = config.fermiaIp;
@@ -232,7 +269,7 @@
         console.error('Error loading config:', error);
         showStatus('Failed to load configuration', false);
       }
-    });
+    }
 
     // Password visibility toggle
     const passwordInput = document.getElementById('password');
@@ -304,27 +341,38 @@
           });
           
           if (response.success) {
-            // Update IP field if received
+            // Update hidden IP field if received
             if (response.ip) {
               document.getElementById('fermiaIp').value = response.ip;
             }
             
-            let statusMsg = `Connected successfully! Fermia IP: ${response.ip}`;
+            let statusMsg = `Connected successfully!`;
             if (response.simulated) {
               statusMsg += " (Simulated connection)";
             }
             
             showStatus(statusMsg, true);
             
-            // Add option to open web interface
+            // Add device IP and option to open web interface
             const statusEl = document.getElementById('status');
-            const existingButton = statusEl.querySelector('.open-web-btn');
             
+            // Check if we already have the device-status element
+            let deviceStatusEl = statusEl.querySelector('.device-status');
+            if (!deviceStatusEl) {
+              deviceStatusEl = document.createElement('div');
+              deviceStatusEl.className = 'device-status';
+              statusEl.appendChild(deviceStatusEl);
+            }
+            
+            // Update device status with IP
+            deviceStatusEl.innerHTML = `Device IP: <span class="device-ip">${response.ip}</span>`;
+            
+            // Check if we already have the launch button
+            const existingButton = statusEl.querySelector('.open-web-btn');
             if (!existingButton) {
               const openWebBtn = document.createElement('button');
               openWebBtn.textContent = 'Launch Fermia';
               openWebBtn.className = 'open-web-btn';
-              openWebBtn.style.marginTop = '10px';
               openWebBtn.onclick = async () => {
                 try {
                   await ipcRenderer.invoke('open-webview', `http://${response.ip}:8501`);
@@ -359,6 +407,34 @@
       sendBtn.disabled = false;
       sendBtn.textContent = 'Connect to Fermia';
       retryCount = 0;
+    });
+    
+    // Refresh button event handler
+    document.getElementById('refreshBtn').addEventListener('click', async () => {
+      await loadConfig();
+      showStatus('Configuration refreshed', true);
+    });
+    
+    // Reset configuration button event handler
+    document.getElementById('resetBtn').addEventListener('click', async () => {
+      if (confirm('Are you sure you want to reset all configuration? This will clear all saved settings.')) {
+        try {
+          const result = await ipcRenderer.invoke('reset-config');
+          if (result.success) {
+            // Clear form fields
+            document.getElementById('ssid').value = '';
+            document.getElementById('password').value = '';
+            document.getElementById('jetsonMac').value = '';
+            document.getElementById('fermiaIp').value = '';
+            
+            showStatus('Configuration has been reset', true);
+          } else {
+            showStatus('Failed to reset configuration', false);
+          }
+        } catch (error) {
+          showStatus(`Error resetting configuration: ${error.message}`, false);
+        }
+      }
     });
     
     function showStatus(message, isSuccess) {

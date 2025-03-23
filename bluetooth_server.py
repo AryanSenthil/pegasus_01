@@ -30,6 +30,7 @@ app.add_middleware(
 class WiFiCredentials(BaseModel):
     ssid: str
     password: str
+    fermiaMac: Optional[str] = None
 
 class FermiaConnect(BaseModel):
     ip: Optional[str] = None
@@ -52,7 +53,7 @@ def save_config(config):
     """Save configuration to the config file."""
     try:
         with open(CONFIG_PATH, 'w') as f:
-            json.dump(config, null=2)
+            json.dump(config, f, indent=2)
         return True
     except Exception as e:
         print(f"Error saving config: {e}")
@@ -65,15 +66,21 @@ async def root():
 
 @app.post("/send-credentials")
 async def send_credentials(credentials: WiFiCredentials):
-    # Load current config to get MAC address
+    # Load current config
     config = load_config()
-    fermia_mac = config.get('fermiaMac')
+    
+    # Use MAC address from request if provided, otherwise from config
+    fermia_mac = credentials.fermiaMac or config.get('fermiaMac')
     
     if not fermia_mac:
         raise HTTPException(
             status_code=400, 
             detail="Fermia MAC address not configured. Please set it in the Configuration tab."
         )
+    
+    # Save the MAC address to config
+    config['fermiaMac'] = fermia_mac
+    save_config(config)
     
     try:
         # Debug message for connection
@@ -177,7 +184,11 @@ PASSWORD = "{config.get('password')}"
             
             # Run the graph.py script
             print("Starting graph.py...")
+            program.connect()
             program.spawn_command("python3 /home/arisenthil/fermia/graph.py")
+            
+            program.connect()
+            program.spawn_command("python3 /home/arisenthil/fermia/photos_app.py")
             
             # Wait a moment for the first process to start
             time.sleep(2)

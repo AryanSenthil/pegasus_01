@@ -53,7 +53,19 @@ function saveConfig(config) {
     }
 }
 
+// Reset configuration to defaults
+function resetConfig() {
+    try {
+        fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
+        return true;
+    } catch (error) {
+        console.error('Error resetting config:', error);
+        return false;
+    }
+}
+
 module.exports = {
     loadConfig,
-    saveConfig
+    saveConfig,
+    resetConfig
 };

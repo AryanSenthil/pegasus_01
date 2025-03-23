@@ -181,19 +181,6 @@
       }
     });
     
-    webview.addEventListener('dom-ready', () => {
-      // Inject a script to prevent links from opening new windows
-      webview.executeJavaScript(`
-        document.addEventListener('click', (e) => {
-          const link = e.target.closest('a');
-          if (link && link.href) {
-            e.preventDefault();
-            document.location.href = link.href;
-          }
-        }, true);
-      `);
-    });
-    
     // Set up controls
     refreshBtn.addEventListener('click', () => {
       retryCount = 0;
@@ -211,13 +198,13 @@
       shell.openExternal(currentUrl);
     });
     
-    // Handle new window requests
+    // Handle new window requests - open in external browser
     webview.addEventListener('new-window', (e) => {
       e.preventDefault();
       const protocol = (new URL(e.url)).protocol;
       if (protocol === 'http:' || protocol === 'https:') {
-        // Replace current webview content
-        webview.src = e.url;
+        // Open in external browser instead of replacing the current content
+        shell.openExternal(e.url);
       }
     });
   </script>

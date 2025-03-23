@@ -4,7 +4,7 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const axios = require('axios');
-const { loadConfig, saveConfig } = require('./config-manager');
+const { loadConfig, saveConfig, resetConfig } = require('./config-manager');
 
 // Path to the Python script
 const pythonScriptPath = path.join(__dirname, 'bluetooth_server.py');
@@ -14,8 +14,8 @@ let webviewWindow = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 500,
-    height: 600,
+    width: 1000,
+    height: 1000,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -153,6 +153,12 @@ ipcMain.handle('save-config', async (event, config) => {
   return saveConfig(config);
 });
 
+// Handle config reset request from renderer
+ipcMain.handle('reset-config', async () => {
+  const result = resetConfig();
+  return { success: result };
+});
+
 // Handle API requests from the renderer for WiFi credentials
 ipcMain.handle('send-credentials', async (event, credentials) => {
   try {
@@ -164,7 +170,8 @@ ipcMain.handle('send-credentials', async (event, credentials) => {
     // Then send to Python backend
     const response = await axios.post('http://localhost:8000/send-credentials', {
       ssid: credentials.ssid,
-      password: credentials.password
+      password: credentials.password,
+      fermiaMac: credentials.fermiaMac // Include MAC address in the API call
     });
     
     // If successful, update the config with the new values
@@ -172,6 +179,7 @@ ipcMain.handle('send-credentials', async (event, credentials) => {
       const config = loadConfig();
       config.wifiSsid = credentials.ssid;
       config.wifiPassword = credentials.password;
+      config.fermiaMac = credentials.fermiaMac;
       
       // If we received a new IP, update that too
       if (response.data.ip) {
