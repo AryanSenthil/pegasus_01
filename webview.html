@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Jetson Streamlit App</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+    
+    #container {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #header {
+      background-color: #343a40;
+      color: white;
+      padding: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    #webview-container {
+      flex-grow: 1;
+      position: relative;
+    }
+    
+    webview {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: inline-flex;
+    }
+    
+    #loading {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #f8f9fa;
+      z-index: 10;
+    }
+    
+    .spinner {
+      border: 5px solid rgba(0, 0, 0, 0.1);
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      border-left-color: #4CAF50;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    #controls button {
+      background-color: transparent;
+      border: none;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+    
+    #controls button:hover {
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="header">
+      <div id="title">Jetson Streamlit Application</div>
+      <div id="controls">
+        <button id="refresh-btn" title="Refresh">↻</button>
+        <button id="back-btn" title="Back">←</button>
+        <button id="open-browser-btn" title="Open in Browser">↗</button>
+      </div>
+    </div>
+    
+    <div id="webview-container">
+      <div id="loading">
+        <div class="spinner"></div>
+      </div>
+      <webview id="embedded-webview" allowpopups></webview>
+    </div>
+  </div>
+  
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    const webview = document.getElementById('embedded-webview');
+    const loadingElem = document.getElementById('loading');
+    const refreshBtn = document.getElementById('refresh-btn');
+    const backBtn = document.getElementById('back-btn');
+    const openBrowserBtn = document.getElementById('open-browser-btn');
+    
+    let currentUrl = '';
+    
+    // Listen for URL to load
+    ipcRenderer.on('load-url', (event, url) => {
+      currentUrl = url;
+      document.title = `Jetson - ${url}`;
+      webview.src = url;
+    });
+    
+    // Add event listeners for webview
+    webview.addEventListener('did-start-loading', () => {
+      loadingElem.style.display = 'flex';
+    });
+    
+    webview.addEventListener('did-stop-loading', () => {
+      loadingElem.style.display = 'none';
+    });
+    
+    webview.addEventListener('dom-ready', () => {
+      // Enable dev tools for debugging if needed
+      // webview.openDevTools();
+    });
+    
+    // Set up controls
+    refreshBtn.addEventListener('click', () => {
+      webview.reload();
+    });
+    
+    backBtn.addEventListener('click', () => {
+      if (webview.canGoBack()) {
+        webview.goBack();
+      }
+    });
+    
+    openBrowserBtn.addEventListener('click', () => {
+      // Uses electron shell to open external browser
+      require('electron').shell.openExternal(currentUrl);
+    });
+    
+    // Handle new window requests
+    webview.addEventListener('new-window', (e) => {
+      const protocol = (new URL(e.url)).protocol;
+      if (protocol === 'http:' || protocol === 'https:') {
+        // Replace current webview content
+        webview.src = e.url;
+      }
+    });
+  </script>
+</body>
+</html>

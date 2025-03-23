@@ -1,41 +1,80 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+// main.js
+
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const axios = require('axios');
+const { loadConfig, saveConfig } = require('./config-manager');
 
 // Path to the Python script
 const pythonScriptPath = path.join(__dirname, 'bluetooth_server.py');
-
 let mainWindow;
 let pythonProcess = null;
+let webviewWindow = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 400,
-    height: 350,
+    width: 500,
+    height: 600,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
     }
   });
-
-  mainWindow.loadFile('index.html');
   
-  // Start the Python backend
+  mainWindow.loadFile('index.html');
+
+  // Start the Python backend 
   startPythonBackend();
 }
 
+function createWebViewWindow(url) {
+  // Close existing webview window if it exists
+  if (webviewWindow && !webviewWindow.isDestroyed()) {
+    webviewWindow.close();
+  }
+  
+  webviewWindow = new BrowserWindow({
+    width: 1024,
+    height: 768,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      webviewTag: true
+    }
+  });
+  
+  // Load HTML with embedded webview
+  webviewWindow.loadFile('webview.html');
+  
+  // Wait for the window to finish loading
+  webviewWindow.webContents.on('did-finish-load', () => {
+    // Send the URL to navigate to
+    webviewWindow.webContents.send('load-url', url);
+  });
+  
+  // Handle new window requests from within the webview
+  webviewWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // Open all external links in default browser
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  
+  webviewWindow.on('closed', () => {
+    webviewWindow = null;
+  });
+}
+
 function startPythonBackend() {
-  // Check if the Python process is already running
+  // Check if the Python process is already running 
   if (pythonProcess) {
     console.log('Python backend is already running');
     return;
   }
 
-  // Start the Python FastAPI server
+  // Start the Python FastAPI server 
   console.log('Starting Python backend...');
-  
-  // Use 'python' or 'python3' depending on your system
+
   pythonProcess = spawn('python3', [pythonScriptPath]);
 
   // Flag to check if server is ready
@@ -44,7 +83,7 @@ function startPythonBackend() {
   pythonProcess.stdout.on('data', (data) => {
     const output = data.toString();
     console.log(`Python backend output: ${output}`);
-    
+
     // Check if the server is up and running
     if (output.includes('Uvicorn running on http://127.0.0.1:8000')) {
       serverReady = true;
@@ -52,10 +91,6 @@ function startPythonBackend() {
         mainWindow.webContents.send('backend-status', { status: 'ready' });
       }
     }
-  });
-
-  pythonProcess.stderr.on('data', (data) => {
-    console.error(`Python backend error: ${data.toString()}`);
   });
 
   pythonProcess.on('close', (code) => {
@@ -67,9 +102,9 @@ function startPythonBackend() {
         error: code !== 0 ? `Process exited with code ${code}` : null
       });
     }
-  });
-  
-  // Check if server is running after a delay
+  })
+
+  // Check if server is running after a delay 
   setTimeout(async () => {
     if (!serverReady) {
       try {
@@ -81,8 +116,8 @@ function startPythonBackend() {
       } catch (err) {
         console.error('Python backend not responding:', err.message);
         if (mainWindow) {
-          mainWindow.webContents.send('backend-status', { 
-            status: 'error', 
+          mainWindow.webContents.send('backend-status', {
+            status: 'error',
             error: 'Failed to connect to Python backend. Make sure Python and required packages are installed.'
           });
         }
@@ -91,10 +126,36 @@ function startPythonBackend() {
   }, 3000);
 }
 
-// Handle API requests from the renderer
+
+// Handle config loading request from renderer
+ipcMain.handle('load-config', async () => {
+  return loadConfig();
+});
+
+// Handle config saving request from renderer
+ipcMain.handle('save-config', async (event, config) => {
+  return saveConfig(config);
+});
+
+
+// Handle API requests from the renderer for WiFi credentials
 ipcMain.handle('send-credentials', async (event, credentials) => {
   try {
     const response = await axios.post('http://localhost:8000/send-credentials', credentials);
+    
+    // If successful, update the config with the new credentials
+    const config = loadConfig();
+    config.wifiSsid = credentials.ssid;
+    config.wifiPassword = credentials.password;
+    config.fermiaMac = credentials.fermiaMac;
+    
+    // If we received a new IP, update that too
+    if (response.data.success && response.data.ip) {
+      config.jetsonIp = response.data.ip;
+    }
+    
+    saveConfig(config);
+    
     return response.data;
   } catch (error) {
     console.error('Error sending credentials:', error);
@@ -105,9 +166,39 @@ ipcMain.handle('send-credentials', async (event, credentials) => {
   }
 });
 
+
+// Handle connect to Jetson SSH request
+ipcMain.handle('connect-fermia', async () => {
+  try {
+    const response = await axios.post('http://localhost:8000/connect-fermia');
+    
+    if (response.data.success) {
+      // Get the URL from the response
+      const config = loadConfig();
+      const streamlitUrl = `http://${config.fermiaIp}:8501`;
+      
+      // Create a new window with embedded webview
+      createWebViewWindow(streamlitUrl);
+    }
+    
+    return response.data;
+  } catch (error) {
+    console.error('Error connecting to Jetson:', error);
+    return {
+      success: false,
+      message: error.response?.data?.detail || error.message || 'Failed to communicate with Python backend'
+    };
+  }
+});
+
+// Handle opening URL in webview
+ipcMain.handle('open-webview', async (event, url) => {
+  createWebViewWindow(url);
+  return { success: true };
+});
+
 app.whenReady().then(() => {
   createWindow();
-
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -119,7 +210,6 @@ app.on('window-all-closed', function () {
     pythonProcess.kill();
     pythonProcess = null;
   }
-  
   if (process.platform !== 'darwin') app.quit();
 });
 
