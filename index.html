@@ -129,6 +129,35 @@
       margin-top: 0;
       margin-bottom: 20px;
     }
+    .show-password {
+      cursor: pointer;
+      user-select: none;
+      color: #007bff;
+      font-size: 0.8em;
+      display: inline-block;
+      margin-top: 5px;
+    }
+    .show-password:hover {
+      text-decoration: underline;
+    }
+    .debug-info {
+      margin-top: 30px;
+      color: #666;
+      font-size: 0.8em;
+    }
+    .debug-info details {
+      margin-bottom: 10px;
+    }
+    .debug-info summary {
+      cursor: pointer;
+      color: #007bff;
+    }
+    .debug-info pre {
+      background-color: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
   </style>
 </head>
 <body>
@@ -143,18 +172,18 @@
     <div class="form-group">
       <label for="password">WiFi Password:</label>
       <input type="password" id="password" placeholder="Enter WiFi password">
-      <span style="cursor: pointer; user-select: none;" id="show-password">Show Password</span>
+      <span class="show-password" id="show-password">Show Password</span>
     </div>
 
     <div class="form-group">
-      <label for="jetsonMac">Fermia MAC:</label>
+      <label for="jetsonMac">Fermia MAC Address:</label>
       <input type="text" id="jetsonMac" placeholder="XX:XX:XX:XX:XX:XX" pattern="([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})">
-      <small>Enter the MAC address of your Fermia device</small>
+      <small>Enter the MAC address of your Fermia device (format: 00:11:22:33:44:55)</small>
     </div>
 
     <div class="form-group">
       <label for="fermiaIp">Fermia IP:</label>
-      <input type="text" id="fermiaIp" placeholder="xxx.xxx.xxx.xxx" readonly>
+      <input type="text" id="fermiaIp" placeholder="xxx.xxx.xxx.xxx">
       <small>This field will be populated after connection</small>
     </div>
 
@@ -162,6 +191,19 @@
   </div>
   
   <div id="status" style="display: none;"></div>
+  
+  <div class="debug-info">
+    <details>
+      <summary>Connection Troubleshooting</summary>
+      <p>If you're having trouble connecting:</p>
+      <ol>
+        <li>Make sure your Fermia device is powered on and Bluetooth is enabled</li>
+        <li>Double-check the MAC address format (XX:XX:XX:XX:XX:XX)</li>
+        <li>Ensure your WiFi network is available and the credentials are correct</li>
+        <li>If connection fails, try restarting the application</li>
+      </ol>
+    </details>
+  </div>
   
   <script>
     const { ipcRenderer } = require('electron');
@@ -181,14 +223,14 @@
         document.getElementById('password').value = config.wifiPassword || '';
         document.getElementById('jetsonMac').value = config.fermiaMac || '';
         
-        // Handle IP address field (which is readonly)
+        // Handle IP address field
         const ipField = document.getElementById('fermiaIp');
         if (config.fermiaIp) {
           ipField.value = config.fermiaIp;
-          ipField.placeholder = config.fermiaIp;
         }
       } catch (error) {
         console.error('Error loading config:', error);
+        showStatus('Failed to load configuration', false);
       }
     });
 
@@ -222,7 +264,7 @@
     });
     
     // Show initial status while waiting for backend
-    showStatus('Wait for Fermia...', null);
+    showStatus('Waiting for Fermia connection...', null);
     
     document.getElementById('sendBtn').addEventListener('click', async () => {
       const ssid = document.getElementById('ssid').value.trim();
@@ -230,7 +272,19 @@
       const fermiaMac = document.getElementById('jetsonMac').value.trim();
       
       if (!ssid) {
-        showStatus('Please enter an SSID', false);
+        showStatus('Please enter a WiFi SSID', false);
+        return;
+      }
+      
+      if (!fermiaMac) {
+        showStatus('Please enter the Fermia MAC address', false);
+        return;
+      }
+      
+      // Validate MAC address format
+      const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+      if (!macRegex.test(fermiaMac)) {
+        showStatus('Invalid MAC address format. Please use XX:XX:XX:XX:XX:XX format', false);
         return;
       }
       
@@ -255,7 +309,12 @@
               document.getElementById('fermiaIp').value = response.ip;
             }
             
-            showStatus(`Connected successfully! Fermia IP: ${response.ip}`, true);
+            let statusMsg = `Connected successfully! Fermia IP: ${response.ip}`;
+            if (response.simulated) {
+              statusMsg += " (Simulated connection)";
+            }
+            
+            showStatus(statusMsg, true);
             
             // Add option to open web interface
             const statusEl = document.getElementById('status');
@@ -289,7 +348,7 @@
             await new Promise(resolve => setTimeout(resolve, 2000));
             return await sendRequest();
           } else {
-            showStatus(`Error: ${error.message}. Error with Packages.`, false);
+            showStatus(`Error: ${error.message}. Please check your connection or restart the app.`, false);
             return false;
           }
         }

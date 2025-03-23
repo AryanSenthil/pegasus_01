@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Jetson Streamlit App</title>
+  <title>Fermia Streamlit App</title>
   <style>
     body, html {
       margin: 0;
@@ -47,10 +47,17 @@
       width: 100%;
       height: 100%;
       display: flex;
+      flex-direction: column;
       justify-content: center;
       align-items: center;
       background-color: #f8f9fa;
       z-index: 10;
+    }
+
+    #loading-status {
+      margin-top: 20px;
+      font-family: sans-serif;
+      color: #666;
     }
     
     .spinner {
@@ -84,7 +91,7 @@
 <body>
   <div id="container">
     <div id="header">
-      <div id="title">Jetson Streamlit Application</div>
+      <div id="title">Fermia Streamlit Application</div>
       <div id="controls">
         <button id="refresh-btn" title="Refresh">↻</button>
         <button id="back-btn" title="Back">←</button>
@@ -95,28 +102,60 @@
     <div id="webview-container">
       <div id="loading">
         <div class="spinner"></div>
+        <div id="loading-status">Loading Fermia interface...</div>
       </div>
-      <webview id="embedded-webview" allowpopups></webview>
+      <webview id="embedded-webview" webpreferences="contextIsolation=false" allowpopups nodeintegration></webview>
     </div>
   </div>
   
   <script>
-    const { ipcRenderer } = require('electron');
+    const { ipcRenderer, shell } = require('electron');
     
     const webview = document.getElementById('embedded-webview');
     const loadingElem = document.getElementById('loading');
+    const loadingStatus = document.getElementById('loading-status');
     const refreshBtn = document.getElementById('refresh-btn');
     const backBtn = document.getElementById('back-btn');
     const openBrowserBtn = document.getElementById('open-browser-btn');
     
     let currentUrl = '';
+    let loadTimeout = null;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
     
     // Listen for URL to load
     ipcRenderer.on('load-url', (event, url) => {
       currentUrl = url;
-      document.title = `Jetson - ${url}`;
-      webview.src = url;
+      document.title = `Fermia - ${url}`;
+      loadWebview(url);
     });
+
+    function loadWebview(url) {
+      // Clear any existing timeout
+      if (loadTimeout) {
+        clearTimeout(loadTimeout);
+      }
+
+      // Show loading screen
+      loadingElem.style.display = 'flex';
+      loadingStatus.textContent = `Loading Fermia interface... (${retryCount}/${MAX_RETRIES})`;
+      
+      // Set a timeout to detect loading failures
+      loadTimeout = setTimeout(() => {
+        if (retryCount < MAX_RETRIES) {
+          retryCount++;
+          loadingStatus.textContent = `Connection timeout. Retrying... (${retryCount}/${MAX_RETRIES})`;
+          loadWebview(url);
+        } else {
+          loadingStatus.textContent = "Could not connect to Fermia. Check your connection and try again.";
+          // Stop the spinner animation
+          document.querySelector('.spinner').style.animationPlayState = 'paused';
+        }
+      }, 15000); // 15 second timeout
+      
+      // Load the URL
+      webview.src = url;
+    }
     
     // Add event listeners for webview
     webview.addEventListener('did-start-loading', () => {
@@ -124,17 +163,41 @@
     });
     
     webview.addEventListener('did-stop-loading', () => {
+      // Clear timeout since page loaded
+      if (loadTimeout) {
+        clearTimeout(loadTimeout);
+        loadTimeout = null;
+      }
+      
       loadingElem.style.display = 'none';
+      
+      // Reset retry count when successfully loaded
+      retryCount = 0;
+    });
+    
+    webview.addEventListener('did-fail-load', (e) => {
+      if (e.errorCode !== -3) { // Ignore -3 which is often just a navigation abort
+        loadingStatus.textContent = `Failed to load: ${e.errorDescription} (${retryCount}/${MAX_RETRIES})`;
+      }
     });
     
     webview.addEventListener('dom-ready', () => {
-      // Enable dev tools for debugging if needed
-      // webview.openDevTools();
+      // Inject a script to prevent links from opening new windows
+      webview.executeJavaScript(`
+        document.addEventListener('click', (e) => {
+          const link = e.target.closest('a');
+          if (link && link.href) {
+            e.preventDefault();
+            document.location.href = link.href;
+          }
+        }, true);
+      `);
     });
     
     // Set up controls
     refreshBtn.addEventListener('click', () => {
-      webview.reload();
+      retryCount = 0;
+      loadWebview(currentUrl);
     });
     
     backBtn.addEventListener('click', () => {
@@ -145,11 +208,12 @@
     
     openBrowserBtn.addEventListener('click', () => {
       // Uses electron shell to open external browser
-      require('electron').shell.openExternal(currentUrl);
+      shell.openExternal(currentUrl);
     });
     
     // Handle new window requests
     webview.addEventListener('new-window', (e) => {
+      e.preventDefault();
       const protocol = (new URL(e.url)).protocol;
       if (protocol === 'http:' || protocol === 'https:') {
         // Replace current webview content

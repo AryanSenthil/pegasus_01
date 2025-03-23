@@ -1,8 +1,8 @@
 {
-  "fermiaIp": "",
+  "fermiaIp": "10.0.0.184",
   "fermiaMac": "",
-  "wifiSsid": "",
-  "wifiPassword": "",
+  "wifiSsid": "Dirachub",
+  "wifiPassword": "750Kuc8&",
   "username": "arisenthil",
   "password": "1012",
   "jetsonIp": ""

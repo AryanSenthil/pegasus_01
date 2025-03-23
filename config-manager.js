@@ -12,16 +12,21 @@ const defaultConfig = {
     wifiSsid: '',
     wifiPassword: '',
     username: 'arisenthil',
-    password: '1012'
+    password: '1012',
+    jetsonIp: ''
 };
-
 
 // Load configuration
 function loadConfig() {
     try {
       if (fs.existsSync(configPath)) {
         const configData = fs.readFileSync(configPath, 'utf8');
-        return JSON.parse(configData);
+        try {
+            return JSON.parse(configData);
+        } catch (parseError) {
+            console.error('Error parsing config JSON:', parseError);
+            return defaultConfig;
+        }
       }
     } catch (error) {
         console.error('Error loading config:', error);
@@ -32,10 +37,15 @@ function loadConfig() {
 }
 
 // Save configuration 
-
 function saveConfig(config) {
     try {
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        // Make sure we have object with all required fields
+        const completeConfig = {
+            ...defaultConfig,
+            ...config
+        };
+        
+        fs.writeFileSync(configPath, JSON.stringify(completeConfig, null, 2));
         return true;
     } catch (error) {
         console.error('Error saving config:', error);

@@ -38,9 +38,10 @@ function createWebViewWindow(url) {
     width: 1024,
     height: 768,
     webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      webviewTag: true
+      nodeIntegration: true,
+      contextIsolation: false,
+      webviewTag: true,
+      webSecurity: false // Allows loading local content
     }
   });
   
@@ -53,12 +54,8 @@ function createWebViewWindow(url) {
     webviewWindow.webContents.send('load-url', url);
   });
   
-  // Handle new window requests from within the webview
-  webviewWindow.webContents.setWindowOpenHandler(({ url }) => {
-    // Open all external links in default browser
-    shell.openExternal(url);
-    return { action: 'deny' };
-  });
+  // Enable debugging in the webview if needed
+  // webviewWindow.webContents.openDevTools();
   
   webviewWindow.on('closed', () => {
     webviewWindow = null;
@@ -72,10 +69,26 @@ function startPythonBackend() {
     return;
   }
 
-  // Start the Python FastAPI server 
   console.log('Starting Python backend...');
 
-  pythonProcess = spawn('python3', [pythonScriptPath]);
+  // First, try with python3
+  try {
+    pythonProcess = spawn('python3', [pythonScriptPath]);
+  } catch (error) {
+    console.log('Failed to start with python3, trying python...');
+    try {
+      pythonProcess = spawn('python', [pythonScriptPath]);
+    } catch (innerError) {
+      console.log('Failed to start Python backend:', innerError);
+      if (mainWindow) {
+        mainWindow.webContents.send('backend-status', { 
+          status: 'error',
+          error: 'Failed to start Python backend. Make sure Python is installed.'
+        });
+      }
+      return;
+    }
+  }
 
   // Flag to check if server is ready
   let serverReady = false;
@@ -93,6 +106,10 @@ function startPythonBackend() {
     }
   });
 
+  pythonProcess.stderr.on('data', (data) => {
+    console.error(`Python backend error: ${data.toString()}`);
+  });
+
   pythonProcess.on('close', (code) => {
     console.log(`Python backend process exited with code ${code}`);
     pythonProcess = null;
@@ -102,7 +119,7 @@ function startPythonBackend() {
         error: code !== 0 ? `Process exited with code ${code}` : null
       });
     }
-  })
+  });
 
   // Check if server is running after a delay 
   setTimeout(async () => {
@@ -123,9 +140,8 @@ function startPythonBackend() {
         }
       }
     }
-  }, 3000);
+  }, 5000); // Increased timeout to 5 seconds
 }
-
 
 // Handle config loading request from renderer
 ipcMain.handle('load-config', async () => {
@@ -137,24 +153,33 @@ ipcMain.handle('save-config', async (event, config) => {
   return saveConfig(config);
 });
 
-
 // Handle API requests from the renderer for WiFi credentials
 ipcMain.handle('send-credentials', async (event, credentials) => {
   try {
-    const response = await axios.post('http://localhost:8000/send-credentials', credentials);
-    
-    // If successful, update the config with the new credentials
+    // Make sure fermiaMac is saved first
     const config = loadConfig();
-    config.wifiSsid = credentials.ssid;
-    config.wifiPassword = credentials.password;
     config.fermiaMac = credentials.fermiaMac;
-    
-    // If we received a new IP, update that too
-    if (response.data.success && response.data.ip) {
-      config.jetsonIp = response.data.ip;
-    }
-    
     saveConfig(config);
+    
+    // Then send to Python backend
+    const response = await axios.post('http://localhost:8000/send-credentials', {
+      ssid: credentials.ssid,
+      password: credentials.password
+    });
+    
+    // If successful, update the config with the new values
+    if (response.data.success) {
+      const config = loadConfig();
+      config.wifiSsid = credentials.ssid;
+      config.wifiPassword = credentials.password;
+      
+      // If we received a new IP, update that too
+      if (response.data.ip) {
+        config.fermiaIp = response.data.ip;
+      }
+      
+      saveConfig(config);
+    }
     
     return response.data;
   } catch (error) {
@@ -166,8 +191,7 @@ ipcMain.handle('send-credentials', async (event, credentials) => {
   }
 });
 
-
-// Handle connect to Jetson SSH request
+// Handle connect to Fermia SSH request
 ipcMain.handle('connect-fermia', async () => {
   try {
     const response = await axios.post('http://localhost:8000/connect-fermia');
@@ -183,7 +207,7 @@ ipcMain.handle('connect-fermia', async () => {
     
     return response.data;
   } catch (error) {
-    console.error('Error connecting to Jetson:', error);
+    console.error('Error connecting to Fermia:', error);
     return {
       success: false,
       message: error.response?.data?.detail || error.message || 'Failed to communicate with Python backend'
